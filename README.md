@@ -107,7 +107,6 @@ Your final project should look like this:
 ├── losses
 │   ├── __init__.py
 │   └── iou_loss.py
-├── metadata.yml
 ├── models
 │   ├── classification.py
 │   ├── __init__.py
