@@ -15,7 +15,24 @@ class VGG11Localizer(nn.Module):
             in_channels: Number of input channels.
             dropout_p: Dropout probability for the localization head.
         """
-        pass
+        super().__init__()
+        from .vgg11 import VGG11Encoder
+        from .layers import CustomDropout
+        
+        self.encoder = VGG11Encoder(in_channels=in_channels)
+        
+        self.regression_head = nn.Sequential(
+            nn.AdaptiveAvgPool2d((7, 7)),
+            nn.Flatten(),
+            nn.Linear(512 * 7 * 7, 4096),
+            nn.ReLU(inplace=True),
+            CustomDropout(p=dropout_p),
+            nn.Linear(4096, 1024),
+            nn.ReLU(inplace=True),
+            CustomDropout(p=dropout_p),
+            nn.Linear(1024, 4),
+            nn.Sigmoid()  # Assuming we scale outputs later
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass for localization model.
@@ -25,5 +42,14 @@ class VGG11Localizer(nn.Module):
         Returns:
             Bounding box coordinates [B, 4] in (x_center, y_center, width, height) format in original image pixel space(not normalized values).
         """
-        # TODO: Implement forward pass.
-        raise NotImplementedError("Implement VGG11Localizer.forward")
+        features = self.encoder(x, return_features=False)
+        
+        # We output a normalized [0, 1] relative to image size.
+        # Multiply by the image dimension height and width
+        norm_boxes = self.regression_head(features)
+        
+        # Multiply x_c, y_c, w, h by the dimensions respectively
+        B, C, H, W = x.shape
+        scale_tensor = torch.tensor([W, H, W, H], dtype=x.dtype, device=x.device)
+        boxes = norm_boxes * scale_tensor
+        return boxes
