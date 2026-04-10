@@ -19,6 +19,10 @@ class MultiTaskPerceptionModel(nn.Module):
             localizer_path: Path to trained localizer weights.
             unet_path: Path to trained unet weights.
         """
+        import gdown
+        gdown.download(id="153foavVenxaXPAfU-PIyk-hODCiKhpTF", output=classifier_path, quiet=False)
+        #gdown.download(id="<localizer.pth drive id>", output=localizer_path, quiet=False)
+        #gdown.download(id="<unet.pth drive id>", output=unet_path, quiet=False)
         super().__init__()
         # Wait until downloaded or loaded. Just initialize heads.
         from .vgg11 import VGG11Encoder

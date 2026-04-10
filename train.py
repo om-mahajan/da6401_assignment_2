@@ -13,6 +13,9 @@ import wandb
 
 from data.pets_dataset import OxfordIIITPetDataset
 from models.multitask import MultiTaskPerceptionModel
+from models.classification import VGG11Classifier
+from models.localization import VGG11Localizer
+from models.segmentation import VGG11UNet
 from losses.iou_loss import IoULoss
 
 def get_transforms(img_size: int = 224):
@@ -33,7 +36,7 @@ def get_transforms(img_size: int = 224):
 
     return train_transform, val_transform
 
-def train_one_epoch(model, train_loader, optimizer, loss_fns, weights, device):
+def train_one_epoch(model, train_loader, optimizer, loss_fns, weights, device, task="multitask"):
     model.train()
     total_loss, cls_loss_sum, loc_loss_sum, seg_loss_sum = 0, 0, 0, 0
     
@@ -47,31 +50,41 @@ def train_one_epoch(model, train_loader, optimizer, loss_fns, weights, device):
         
         outputs = model(images)
         
-        loss_cls = loss_fns["classification"](outputs["classification"], class_targets)
-        loss_loc = loss_fns["localization"](outputs["localization"], bbox_targets)
-        loss_seg = loss_fns["segmentation"](outputs["segmentation"], seg_targets)
+        loss = 0
+        loss_cls, loss_loc, loss_seg = 0, 0, 0
         
-        loss = (weights["classification"] * loss_cls +
-                weights["localization"] * loss_loc +
-                weights["segmentation"] * loss_seg)
+        if task in ["classification", "multitask"]:
+            out_cls = outputs["classification"] if task == "multitask" else outputs
+            loss_cls = loss_fns["classification"](out_cls, class_targets)
+            loss += weights["classification"] * loss_cls
+            cls_loss_sum += loss_cls.item()
+            
+        if task in ["localization", "multitask"]:
+            out_loc = outputs["localization"] if task == "multitask" else outputs
+            loss_loc = loss_fns["localization"](out_loc, bbox_targets)
+            loss += weights["localization"] * loss_loc
+            loc_loss_sum += loss_loc.item()
+            
+        if task in ["segmentation", "multitask"]:
+            out_seg = outputs["segmentation"] if task == "multitask" else outputs
+            loss_seg = loss_fns["segmentation"](out_seg, seg_targets)
+            loss += weights["segmentation"] * loss_seg
+            seg_loss_sum += loss_seg.item()
         
         loss.backward()
         optimizer.step()
         
         total_loss += loss.item()
-        cls_loss_sum += loss_cls.item()
-        loc_loss_sum += loss_loc.item()
-        seg_loss_sum += loss_seg.item()
         
     num_batches = len(train_loader)
     return {
         "train/loss": total_loss / num_batches,
-        "train/loss_cls": cls_loss_sum / num_batches,
-        "train/loss_loc": loc_loss_sum / num_batches,
-        "train/loss_seg": seg_loss_sum / num_batches,
+        "train/loss_cls": cls_loss_sum / num_batches if task in ["classification", "multitask"] else 0,
+        "train/loss_loc": loc_loss_sum / num_batches if task in ["localization", "multitask"] else 0,
+        "train/loss_seg": seg_loss_sum / num_batches if task in ["segmentation", "multitask"] else 0,
     }
 
-def validate(model, val_loader, loss_fns, weights, device):
+def validate(model, val_loader, loss_fns, weights, device, task="multitask"):
     model.eval()
     total_loss, cls_loss_sum, loc_loss_sum, seg_loss_sum = 0, 0, 0, 0
     
@@ -84,25 +97,34 @@ def validate(model, val_loader, loss_fns, weights, device):
             
             outputs = model(images)
             
-            loss_cls = loss_fns["classification"](outputs["classification"], class_targets)
-            loss_loc = loss_fns["localization"](outputs["localization"], bbox_targets)
-            loss_seg = loss_fns["segmentation"](outputs["segmentation"], seg_targets)
+            loss = 0
             
-            loss = (weights["classification"] * loss_cls +
-                    weights["localization"] * loss_loc +
-                    weights["segmentation"] * loss_seg)
+            if task in ["classification", "multitask"]:
+                out_cls = outputs["classification"] if task == "multitask" else outputs
+                loss_cls = loss_fns["classification"](out_cls, class_targets)
+                loss += weights["classification"] * loss_cls
+                cls_loss_sum += loss_cls.item()
+                
+            if task in ["localization", "multitask"]:
+                out_loc = outputs["localization"] if task == "multitask" else outputs
+                loss_loc = loss_fns["localization"](out_loc, bbox_targets)
+                loss += weights["localization"] * loss_loc
+                loc_loss_sum += loss_loc.item()
+                
+            if task in ["segmentation", "multitask"]:
+                out_seg = outputs["segmentation"] if task == "multitask" else outputs
+                loss_seg = loss_fns["segmentation"](out_seg, seg_targets)
+                loss += weights["segmentation"] * loss_seg
+                seg_loss_sum += loss_seg.item()
             
             total_loss += loss.item()
-            cls_loss_sum += loss_cls.item()
-            loc_loss_sum += loss_loc.item()
-            seg_loss_sum += loss_seg.item()
             
     num_batches = len(val_loader)
     return {
         "val/loss": total_loss / num_batches,
-        "val/loss_cls": cls_loss_sum / num_batches,
-        "val/loss_loc": loc_loss_sum / num_batches,
-        "val/loss_seg": seg_loss_sum / num_batches,
+        "val/loss_cls": cls_loss_sum / num_batches if task in ["classification", "multitask"] else 0,
+        "val/loss_loc": loc_loss_sum / num_batches if task in ["localization", "multitask"] else 0,
+        "val/loss_seg": seg_loss_sum / num_batches if task in ["segmentation", "multitask"] else 0,
     }
 
 def main(args):
@@ -129,8 +151,15 @@ def main(args):
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
     
-    # Initialize model with user-provided parameters
-    model = MultiTaskPerceptionModel(num_breeds=37, seg_classes=3, in_channels=3, dropout_p=args.dropout_p).to(device)
+    # Initialize model based on task
+    if args.task == "classification":
+        model = VGG11Classifier(num_classes=37, dropout_p=args.dropout_p).to(device)
+    elif args.task == "localization":
+        model = VGG11Localizer(dropout_p=args.dropout_p).to(device)
+    elif args.task == "segmentation":
+        model = VGG11UNet(num_classes=3, dropout_p=args.dropout_p).to(device)
+    else: # multitask
+        model = MultiTaskPerceptionModel(num_breeds=37, seg_classes=3, in_channels=3, dropout_p=args.dropout_p).to(device)
     
     # Handle transfer learning / backbone freezing
     if args.freeze_backbone:
@@ -169,8 +198,8 @@ def main(args):
     for epoch in range(args.epochs):
         print(f"Epoch {epoch+1}/{args.epochs}")
         
-        train_metrics = train_one_epoch(model, train_loader, optimizer, loss_fns, weights, device)
-        val_metrics = validate(model, val_loader, loss_fns, weights, device)
+        train_metrics = train_one_epoch(model, train_loader, optimizer, loss_fns, weights, device, task=args.task)
+        val_metrics = validate(model, val_loader, loss_fns, weights, device, task=args.task)
         
         wandb.log({**train_metrics, **val_metrics, "epoch": epoch})
         
@@ -192,6 +221,7 @@ if __name__ == "__main__":
     parser.add_argument("--img_size", type=int, default=224)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--wandb_entity", type=str, default=None, help="Your W&B team/organization name")
+    parser.add_argument("--task", type=str, default="multitask", choices=["classification", "localization", "segmentation", "multitask"], help="Which task model to train")
     
     # Model configuration
     parser.add_argument("--dropout_p", type=float, default=0.5, help="Dropout probability")

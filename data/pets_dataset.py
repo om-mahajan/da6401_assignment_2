@@ -173,7 +173,7 @@ class OxfordIIITPetDataset(Dataset):
         targets = {
             "class_id": torch.tensor(sample["class_id"], dtype=torch.long),
             "bbox": bbox_tensor,
-            "segmentation": torch.tensor(trimap, dtype=torch.long)
+            "segmentation": trimap.clone().detach().to(torch.long) if torch.is_tensor(trimap) else torch.tensor(trimap, dtype=torch.long)
         }
         
         if not torch.is_tensor(image):
