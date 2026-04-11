@@ -216,7 +216,7 @@ if __name__ == "__main__":
     parser.add_argument("--run_name", type=str, default="baseline")
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--weight_decay", type=float, default=1e-5)
     parser.add_argument("--img_size", type=int, default=224)
     parser.add_argument("--num_workers", type=int, default=4)

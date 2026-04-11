@@ -16,11 +16,13 @@ class MultiTaskPerceptionModel(nn.Module):
             in_channels: Number of input channels.
             dropout_p: Custom dropout rate
             classifier_path: Path to trained classifier weights.
-            localizer_path: Path to trained localizer weights.
+            localizer_path: Path to trained localizer weig          hts.
             unet_path: Path to trained unet weights.
         """
         import gdown
-        gdown.download(id="153foavVenxaXPAfU-PIyk-hODCiKhpTF", output=classifier_path, quiet=False)
+        import os
+        if not os.path.exists(classifier_path):
+            gdown.download(id="1JwNYCBI4zfHPinEZyeSn7opYX2ARvWPK", output=classifier_path, quiet=False)
         #gdown.download(id="<localizer.pth drive id>", output=localizer_path, quiet=False)
         #gdown.download(id="<unet.pth drive id>", output=unet_path, quiet=False)
         super().__init__()
@@ -32,7 +34,15 @@ class MultiTaskPerceptionModel(nn.Module):
         
         self.encoder = VGG11Encoder(in_channels=in_channels)
         
-        self.classification_head = VGG11Classifier(num_classes=num_breeds, in_channels=in_channels, dropout_p=dropout_p).classifier
+        # Load weights
+        classifier = VGG11Classifier(num_classes=num_breeds, in_channels=in_channels, dropout_p=dropout_p)
+        if os.path.exists(classifier_path):
+            state_dict = torch.load(classifier_path, map_location="cpu")
+            classifier.load_state_dict(state_dict)
+            
+        self.classification_head = classifier.classifier
+        self.encoder = classifier.encoder # use shared encoder from classifier
+
         self.regression_head = VGG11Localizer(in_channels=in_channels, dropout_p=dropout_p).regression_head
         
         unet = VGG11UNet(num_classes=seg_classes, in_channels=in_channels, dropout_p=dropout_p)
