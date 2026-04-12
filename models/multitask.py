@@ -22,7 +22,7 @@ class MultiTaskPerceptionModel(nn.Module):
         import gdown
         import os
         if not os.path.exists(classifier_path):
-            gdown.download(id="1hZ_1nodUAH8MY74WXBUtpCf54_ig9sax", output=classifier_path, quiet=False)
+            gdown.download(id="1qPdQNpPJ6-1adyUyJ-8oYZwj4K3QBXxi", output=classifier_path, quiet=False)
         #gdown.download(id="<localizer.pth drive id>", output=localizer_path, quiet=False)
         #gdown.download(id="<unet.pth drive id>", output=unet_path, quiet=False)
         super().__init__()
