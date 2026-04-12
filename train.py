@@ -1,5 +1,6 @@
 """Training entrypoint"""
 import argparse
+import json
 import os
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
+import numpy as np
 import wandb
 
 from data.pets_dataset import OxfordIIITPetDataset
@@ -18,20 +20,85 @@ from models.localization import VGG11Localizer
 from models.segmentation import VGG11UNet
 from losses.iou_loss import IoULoss
 
-def get_transforms(img_size: int = 224):
+def compute_dataset_stats(data_dir: str, img_size: int = 224):
+    """Compute per-channel mean and std from training images. Caches result to a JSON file."""
+    cache_path = Path(data_dir) / "dataset_stats.json"
+    if cache_path.exists():
+        with open(cache_path) as f:
+            stats = json.load(f)
+        print(f"[Norm] Loaded cached dataset stats from {cache_path}")
+        return tuple(stats["mean"]), tuple(stats["std"])
+
+    print("[Norm] Computing dataset mean/std (one-time)...")
+    # Load images with simple [0,1] transform to compute stats
+    simple_transform = A.Compose([
+        A.Resize(img_size, img_size),
+        A.Normalize(mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0)),
+        ToTensorV2()
+    ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_ids']))
+
+    dataset = OxfordIIITPetDataset(root=data_dir, split="train", transform=simple_transform)
+    loader = DataLoader(dataset, batch_size=64, shuffle=False, num_workers=2)
+
+    pixel_sum = np.zeros(3)
+    pixel_sq_sum = np.zeros(3)
+    num_pixels = 0
+
+    for images, _ in loader:
+        # images: [B, 3, H, W] in [0, 1]
+        b, c, h, w = images.shape
+        npix = b * h * w
+        pixel_sum += images.sum(dim=[0, 2, 3]).numpy()
+        pixel_sq_sum += (images ** 2).sum(dim=[0, 2, 3]).numpy()
+        num_pixels += npix
+
+    mean = pixel_sum / num_pixels
+    std = np.sqrt(pixel_sq_sum / num_pixels - mean ** 2)
+
+    stats = {"mean": mean.tolist(), "std": std.tolist()}
+    with open(cache_path, "w") as f:
+        json.dump(stats, f, indent=2)
+    print(f"[Norm] Dataset stats: mean={mean.round(4).tolist()}, std={std.round(4).tolist()}")
+    print(f"[Norm] Cached to {cache_path}")
+    return tuple(mean), tuple(std)
+
+
+def get_transforms(img_size: int = 224, norm_mode: str = "imagenet", data_dir: str = None):
+    """Get train/val transforms.
+    Args:
+        img_size: Target image size.
+        norm_mode: 'imagenet' | 'simple' | 'centered' | 'dataset'.
+        data_dir: Path to dataset root (required for 'dataset' mode).
+    """
+    if norm_mode == "imagenet":
+        mean = (0.485, 0.456, 0.406)
+        std  = (0.229, 0.224, 0.225)
+    elif norm_mode == "centered":
+        mean = (0.5, 0.5, 0.5)
+        std  = (0.5, 0.5, 0.5)
+    elif norm_mode == "dataset":
+        if data_dir is None:
+            raise ValueError("data_dir is required for 'dataset' normalization mode")
+        mean, std = compute_dataset_stats(data_dir, img_size)
+    else:  # simple: just scale to [0, 1]
+        mean = (0.0, 0.0, 0.0)
+        std  = (1.0, 1.0, 1.0)
+
+    print(f"[Norm] Using '{norm_mode}' normalization: mean={mean}, std={std}")
+
     train_transform = A.Compose([
         A.Resize(img_size, img_size),
         A.HorizontalFlip(p=0.5),
         A.ShiftScaleRotate(shift_limit=0.05, scale_limit=0.1, rotate_limit=15, p=0.5),
         A.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.1, p=0.4),
         A.GaussNoise(std_range=(0.02, 0.05), p=0.2),
-        A.Normalize(mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0)), # Scale to [0, 1] for autograder
+        A.Normalize(mean=mean, std=std),
         ToTensorV2()
     ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_ids']))
 
     val_transform = A.Compose([
         A.Resize(img_size, img_size),
-        A.Normalize(mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0)), # Scale to [0, 1] for autograder
+        A.Normalize(mean=mean, std=std),
         ToTensorV2()
     ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_ids']))
 
@@ -145,7 +212,7 @@ def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
-    train_transform, val_transform = get_transforms(args.img_size)
+    train_transform, val_transform = get_transforms(args.img_size, norm_mode=args.norm, data_dir=args.data_dir)
     
     train_dataset = OxfordIIITPetDataset(root=args.data_dir, split="train", transform=train_transform)
     val_dataset = OxfordIIITPetDataset(root=args.data_dir, split="val", transform=val_transform)
@@ -239,6 +306,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--weight_decay", type=float, default=1e-5)
     parser.add_argument("--img_size", type=int, default=224)
+    parser.add_argument("--norm", type=str, default="imagenet", choices=["imagenet", "simple", "centered", "dataset"], help="Normalization: 'imagenet', 'simple' ([0,1]), 'centered' ([-1,1]), 'dataset' (auto-computed)")
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--wandb_entity", type=str, default=None, help="Your W&B team/organization name")
     parser.add_argument("--task", type=str, default="multitask", choices=["classification", "localization", "segmentation", "multitask"], help="Which task model to train")
