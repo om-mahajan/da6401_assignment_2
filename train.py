@@ -22,15 +22,16 @@ def get_transforms(img_size: int = 224):
     train_transform = A.Compose([
         A.Resize(img_size, img_size),
         A.HorizontalFlip(p=0.5),
-        A.VerticalFlip(p=0.5),
-        A.ColorJitter(brightness=0.2, contrast=0.2, p=0.3),
-        A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+        A.ShiftScaleRotate(shift_limit=0.05, scale_limit=0.1, rotate_limit=15, p=0.5),
+        A.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.1, p=0.4),
+        A.GaussNoise(std_range=(0.02, 0.05), p=0.2),
+        A.Normalize(mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0)), # Scale to [0, 1] for autograder
         ToTensorV2()
     ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_ids']))
 
     val_transform = A.Compose([
         A.Resize(img_size, img_size),
-        A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+        A.Normalize(mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0)), # Scale to [0, 1] for autograder
         ToTensorV2()
     ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_ids']))
 
@@ -72,6 +73,7 @@ def train_one_epoch(model, train_loader, optimizer, loss_fns, weights, device, t
             seg_loss_sum += loss_seg.item()
         
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
         optimizer.step()
         
         total_loss += loss.item()
@@ -190,6 +192,15 @@ def main(args):
     }
     
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
+    
+    # Map task to canonical checkpoint name for autograder
+    canonical_names = {
+        "classification": "classifier.pth",
+        "localization": "localizer.pth",
+        "segmentation": "unet.pth",
+        "multitask": "multitask_best.pth"
+    }
     
     best_val_loss = float("inf")
     save_dir = Path("checkpoints")
@@ -201,12 +212,21 @@ def main(args):
         train_metrics = train_one_epoch(model, train_loader, optimizer, loss_fns, weights, device, task=args.task)
         val_metrics = validate(model, val_loader, loss_fns, weights, device, task=args.task)
         
-        wandb.log({**train_metrics, **val_metrics, "epoch": epoch})
+        # Step the LR scheduler
+        scheduler.step(val_metrics["val/loss"])
+        current_lr = optimizer.param_groups[0]['lr']
+        
+        wandb.log({**train_metrics, **val_metrics, "epoch": epoch, "lr": current_lr})
+        
+        print(f"  Train Loss: {train_metrics['train/loss']:.4f}  Val Loss: {val_metrics['val/loss']:.4f}  LR: {current_lr:.2e}")
         
         if val_metrics["val/loss"] < best_val_loss:
             best_val_loss = val_metrics["val/loss"]
+            # Save with both run_name and canonical name
             torch.save(model.state_dict(), save_dir / f"{args.run_name}_best.pth")
-            print(f"  >> Saved best model with val_loss: {best_val_loss:.4f}")
+            canonical = canonical_names.get(args.task, f"{args.task}_best.pth")
+            torch.save(model.state_dict(), save_dir / canonical)
+            print(f"  >> Saved best model with val_loss: {best_val_loss:.4f} → {canonical}")
             
     wandb.finish()
 
@@ -214,7 +234,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_dir", type=str, default="./data/oxford-iiit-pet")
     parser.add_argument("--run_name", type=str, default="baseline")
-    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--epochs", type=int, default=80)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--weight_decay", type=float, default=1e-5)

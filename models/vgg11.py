@@ -53,6 +53,9 @@ class VGG11Encoder(nn.Module):
         self.relu5_2 = nn.ReLU(inplace=True)
         self.pool5 = nn.MaxPool2d(kernel_size=2, stride=2)
 
+        # --- Proper weight initialization (critical for training from scratch) ---
+        self._initialize_weights()
+
     def forward(
         self, x: torch.Tensor, return_features: bool = False
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, Dict[str, torch.Tensor]]]:
@@ -113,3 +116,17 @@ class VGG11Encoder(nn.Module):
         if return_features:
             return bottleneck, features_dict
         return bottleneck
+
+    def _initialize_weights(self):
+        """Apply Kaiming He initialization to all conv/linear layers."""
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.ones_(m.weight)
+                nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
+                nn.init.zeros_(m.bias)
