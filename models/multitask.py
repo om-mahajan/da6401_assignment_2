@@ -42,7 +42,10 @@ class MultiTaskPerceptionModel(nn.Module):
         self.classification_head = classifier.classifier
         self.encoder = classifier.encoder # use shared encoder from classifier
 
-        self.regression_head = VGG11Localizer(in_channels=in_channels, dropout_p=dropout_p).regression_head
+        localizer = VGG11Localizer(in_channels=in_channels, dropout_p=dropout_p)
+        loc_state_dict = torch.load(localizer_path, map_location="cpu")
+        localizer.load_state_dict(loc_state_dict)
+        self.regression_head = localizer.regression_head
         
         unet = VGG11UNet(num_classes=seg_classes, in_channels=in_channels, dropout_p=dropout_p)
         self.up4 = unet.up4
