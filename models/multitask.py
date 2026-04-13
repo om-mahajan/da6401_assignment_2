@@ -20,10 +20,9 @@ class MultiTaskPerceptionModel(nn.Module):
             unet_path: Path to trained unet weights.
         """
         import gdown
-        import os
-        if not os.path.exists(classifier_path):
-            gdown.download(id="1qPdQNpPJ6-1adyUyJ-8oYZwj4K3QBXxi", output=classifier_path, quiet=False)
-            gdown.download(id="1trcg3Kwmstql46hukE-ojhDP2WfDnOmJ", output=localizer_path, quiet=False)
+        
+        gdown.download(id="1qPdQNpPJ6-1adyUyJ-8oYZwj4K3QBXxi", output=classifier_path, quiet=False)
+        gdown.download(id="1trcg3Kwmstql46hukE-ojhDP2WfDnOmJ", output=localizer_path, quiet=False)
         #gdown.download(id="<unet.pth drive id>", output=unet_path, quiet=False)
         super().__init__()
         # Wait until downloaded or loaded. Just initialize heads.
