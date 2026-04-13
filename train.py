@@ -129,7 +129,10 @@ def train_one_epoch(model, train_loader, optimizer, loss_fns, weights, device, t
             
         if task in ["localization", "multitask"]:
             out_loc = outputs["localization"] if task == "multitask" else outputs
-            loss_loc = loss_fns["localization"](out_loc, bbox_targets)
+            loss_iou = loss_fns["localization"](out_loc, bbox_targets)
+            loss_l1 = loss_fns.get("localization_l1", nn.SmoothL1Loss())(out_loc, bbox_targets)
+            # Combine IoU with SmoothL1 to provide gradients even when boxes don't overlap
+            loss_loc = loss_iou + 0.5 * loss_l1
             loss += weights["localization"] * loss_loc
             loc_loss_sum += loss_loc.item()
             
@@ -176,7 +179,9 @@ def validate(model, val_loader, loss_fns, weights, device, task="multitask"):
                 
             if task in ["localization", "multitask"]:
                 out_loc = outputs["localization"] if task == "multitask" else outputs
-                loss_loc = loss_fns["localization"](out_loc, bbox_targets)
+                loss_iou = loss_fns["localization"](out_loc, bbox_targets)
+                loss_l1 = loss_fns.get("localization_l1", nn.SmoothL1Loss())(out_loc, bbox_targets)
+                loss_loc = loss_iou + 0.5 * loss_l1
                 loss += weights["localization"] * loss_loc
                 loc_loss_sum += loss_loc.item()
                 
@@ -246,10 +251,15 @@ def main(args):
             for param in block.parameters():
                 param.requires_grad = True
 
+    # Seg class weights: Background and foreground are massive. Border is thin. 
+    # Emphasize border class to avoid mode collapse into predicting only background.
+    seg_class_weights = torch.tensor([1.0, 1.0, 4.0], device=device)
+
     loss_fns = {
         "classification": nn.CrossEntropyLoss(),
         "localization": IoULoss(reduction="mean"),
-        "segmentation": nn.CrossEntropyLoss(ignore_index=255)
+        "localization_l1": nn.SmoothL1Loss(reduction="mean"),
+        "segmentation": nn.CrossEntropyLoss(weight=seg_class_weights, ignore_index=255)
     }
     
     weights = {

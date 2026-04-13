@@ -22,8 +22,8 @@ class MultiTaskPerceptionModel(nn.Module):
         import gdown
         import os
         if not os.path.exists(classifier_path):
-            gdown.download(id="1qPdQNpPJ6-1adyUyJ-8oYZwj4K3QBXxi", output=classifier_path, quiet=False)
-        #gdown.download(id="<localizer.pth drive id>", output=localizer_path, quiet=False)
+            #gdown.download(id="1qPdQNpPJ6-1adyUyJ-8oYZwj4K3QBXxi", output=classifier_path, quiet=False)
+            gdown.download(id="1LFQAL4ILJg0iGmMph_44O2YE-lFm4hUh", output=localizer_path, quiet=False)
         #gdown.download(id="<unet.pth drive id>", output=unet_path, quiet=False)
         super().__init__()
         # Wait until downloaded or loaded. Just initialize heads.
