@@ -35,9 +35,9 @@ class MultiTaskPerceptionModel(nn.Module):
         
         # Load weights
         classifier = VGG11Classifier(num_classes=num_breeds, in_channels=in_channels, dropout_p=dropout_p)
-        if os.path.exists(classifier_path):
-            state_dict = torch.load(classifier_path, map_location="cpu")
-            classifier.load_state_dict(state_dict)
+        
+        state_dict = torch.load(classifier_path, map_location="cpu")
+        classifier.load_state_dict(state_dict)
             
         self.classification_head = classifier.classifier
         self.encoder = classifier.encoder # use shared encoder from classifier
