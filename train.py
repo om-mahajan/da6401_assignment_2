@@ -20,6 +20,16 @@ from models.localization import VGG11Localizer
 from models.segmentation import VGG11UNet
 from losses.iou_loss import IoULoss
 
+
+def xyxy_to_cxcywh(boxes: torch.Tensor) -> torch.Tensor:
+    """Convert [x1, y1, x2, y2] → [cx, cy, w, h]"""
+    x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+    cx = (x1 + x2) / 2
+    cy = (y1 + y2) / 2
+    w  = x2 - x1
+    h  = y2 - y1
+    return torch.stack([cx, cy, w, h], dim=1)
+
 def compute_dataset_stats(data_dir: str, img_size: int = 224):
     """Compute per-channel mean and std from training images. Caches result to a JSON file."""
     cache_path = Path(data_dir) / "dataset_stats.json"
@@ -32,7 +42,8 @@ def compute_dataset_stats(data_dir: str, img_size: int = 224):
     print("[Norm] Computing dataset mean/std (one-time)...")
     # Load images with simple [0,1] transform to compute stats
     simple_transform = A.Compose([
-        A.Resize(img_size, img_size),
+        A.LongestMaxSize(max_size=img_size),
+        A.PadIfNeeded(min_height=img_size, min_width=img_size, border_mode=0, value=0),
         A.Normalize(mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0)),
         ToTensorV2()
     ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_ids']))
@@ -87,7 +98,8 @@ def get_transforms(img_size: int = 224, norm_mode: str = "imagenet", data_dir: s
     print(f"[Norm] Using '{norm_mode}' normalization: mean={mean}, std={std}")
 
     train_transform = A.Compose([
-        A.Resize(img_size, img_size),
+        A.LongestMaxSize(max_size=img_size),
+        A.PadIfNeeded(min_height=img_size, min_width=img_size, border_mode=0, value=0),
         A.HorizontalFlip(p=0.5),
         A.ShiftScaleRotate(shift_limit=0.05, scale_limit=0.1, rotate_limit=15, p=0.5),
         A.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.1, p=0.4),
@@ -97,7 +109,8 @@ def get_transforms(img_size: int = 224, norm_mode: str = "imagenet", data_dir: s
     ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_ids']))
 
     val_transform = A.Compose([
-        A.Resize(img_size, img_size),
+        A.LongestMaxSize(max_size=img_size),
+        A.PadIfNeeded(min_height=img_size, min_width=img_size, border_mode=0, value=0),
         A.Normalize(mean=mean, std=std),
         ToTensorV2()
     ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_ids']))
@@ -111,7 +124,7 @@ def train_one_epoch(model, train_loader, optimizer, loss_fns, weights, device, t
     for images, targets in train_loader:
         images = images.to(device)
         class_targets = targets["class_id"].to(device)
-        bbox_targets = targets["bbox"].to(device)
+        bbox_targets = xyxy_to_cxcywh(targets["bbox"].to(device))
         seg_targets = targets["segmentation"].to(device)
         
         optimizer.zero_grad()
@@ -130,7 +143,8 @@ def train_one_epoch(model, train_loader, optimizer, loss_fns, weights, device, t
         if task in ["localization", "multitask"]:
             out_loc = outputs["localization"] if task == "multitask" else outputs
             loss_iou = loss_fns["localization"](out_loc, bbox_targets)
-            loss_l1 = loss_fns.get("localization_l1", nn.SmoothL1Loss())(out_loc, bbox_targets)
+            img_size_val = images.shape[-1]
+            loss_l1 = loss_fns.get("localization_l1", nn.SmoothL1Loss())(out_loc / img_size_val, bbox_targets / img_size_val)
             # Combine IoU with SmoothL1 to provide gradients even when boxes don't overlap
             loss_loc = loss_iou + 0.5 * loss_l1
             loss += weights["localization"] * loss_loc
@@ -164,7 +178,7 @@ def validate(model, val_loader, loss_fns, weights, device, task="multitask"):
         for images, targets in val_loader:
             images = images.to(device)
             class_targets = targets["class_id"].to(device)
-            bbox_targets = targets["bbox"].to(device)
+            bbox_targets = xyxy_to_cxcywh(targets["bbox"].to(device))
             seg_targets = targets["segmentation"].to(device)
             
             outputs = model(images)
@@ -180,7 +194,8 @@ def validate(model, val_loader, loss_fns, weights, device, task="multitask"):
             if task in ["localization", "multitask"]:
                 out_loc = outputs["localization"] if task == "multitask" else outputs
                 loss_iou = loss_fns["localization"](out_loc, bbox_targets)
-                loss_l1 = loss_fns.get("localization_l1", nn.SmoothL1Loss())(out_loc, bbox_targets)
+                img_size_val = images.shape[-1]
+                loss_l1 = loss_fns.get("localization_l1", nn.SmoothL1Loss())(out_loc / img_size_val, bbox_targets / img_size_val)
                 loss_loc = loss_iou + 0.5 * loss_l1
                 loss += weights["localization"] * loss_loc
                 loc_loss_sum += loss_loc.item()
