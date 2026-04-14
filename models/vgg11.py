@@ -10,13 +10,13 @@ import torch.nn as nn
 class VGG11Encoder(nn.Module):
 
 
-    def __init__(self, in_channels: int = 3, use_batchnorm: bool = True):
+    def __init__(self, in_channels: int = 3):
         """Initialize the VGG11Encoder model."""
         super().__init__()
         
         # Block 1: output channel 64, 1 conv
         self.conv1 = nn.Conv2d(in_channels, 64, kernel_size=3, padding=1)
-        nn.BatchNorm2d(64) if use_batchnorm else nn.Identity()
+        self.bn1 = nn.BatchNorm2d(64)
         self.relu1 = nn.ReLU(inplace=True)
         self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
         

@@ -242,7 +242,7 @@ def main(args):
     
     # Initialize model based on task
     if args.task == "classification":
-        model = VGG11Classifier(num_classes=37, dropout_p=args.dropout_p, use_batchnorm=not args.no_batchnorm)
+        model = VGG11Classifier(num_classes=37, dropout_p=args.dropout_p).to(device)
     elif args.task == "localization":
         model = VGG11Localizer(dropout_p=args.dropout_p).to(device)
     elif args.task == "segmentation":
@@ -346,6 +346,6 @@ if __name__ == "__main__":
     parser.add_argument("--w_loc", type=float, default=5.0) # IoU needs higher weight generally
     parser.add_argument("--w_seg", type=float, default=1.0)
     
-    parser.add_argument("--no_batchnorm", action="store_true",help="Disable BatchNorm in encoder")
+    
     args = parser.parse_args()
     main(args)
