@@ -48,6 +48,8 @@ class MultiTaskPerceptionModel(nn.Module):
         self.regression_head = localizer.regression_head
         
         unet = VGG11UNet(num_classes=seg_classes, in_channels=in_channels, dropout_p=dropout_p)
+        #unet_state_dict = torch.load(seg_path, map_location="cpu")
+        #unet.load_state_dict(unet_state_dict)
         self.up4 = unet.up4
         self.dec4 = unet.dec4
         self.up3 = unet.up3
